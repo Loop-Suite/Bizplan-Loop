@@ -103,7 +103,10 @@ impl Spec {
             .map(|s| {
                 let mut line = format!("## {}\n- Writing guide: {}", s.title, s.guide);
                 if s.chars > 0 {
-                    line.push_str(&format!("\n- Recommended length: approx. {} chars", s.chars));
+                    line.push_str(&format!(
+                        "\n- Recommended length: approx. {} chars",
+                        s.chars
+                    ));
                 }
                 if s.required {
                     line.push_str("\n- Required section");

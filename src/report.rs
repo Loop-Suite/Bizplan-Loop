@@ -29,7 +29,11 @@ fn header(spec: &Spec, rows: &[&Scored]) -> String {
         "{} documents · {} scoring passes per document · scoring model: {}\n\n",
         rows.len(),
         rounds,
-        if models.is_empty() { "-".into() } else { models }
+        if models.is_empty() {
+            "-".into()
+        } else {
+            models
+        }
     ));
     md
 }
@@ -90,7 +94,11 @@ fn details(rows: &[&Scored]) -> String {
             md.push('\n');
         }
         md.push_str("Improvement instructions:\n\n");
-        for imp in s.improvements.iter().filter(|i| !s.format_issues.contains(i)) {
+        for imp in s
+            .improvements
+            .iter()
+            .filter(|i| !s.format_issues.contains(i))
+        {
             md.push_str(&format!("- {}\n", imp));
         }
     }
@@ -100,7 +108,11 @@ fn details(rows: &[&Scored]) -> String {
 /// Ranking report.
 pub fn write_report(out_dir: &Path, spec: &Spec, scored: &[Scored]) -> Result<PathBuf> {
     let mut rows: Vec<&Scored> = scored.iter().collect();
-    rows.sort_by(|a, b| b.total.partial_cmp(&a.total).unwrap_or(std::cmp::Ordering::Equal));
+    rows.sort_by(|a, b| {
+        b.total
+            .partial_cmp(&a.total)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut md = header(spec, &rows);
     md.push_str(&table(spec, &rows));

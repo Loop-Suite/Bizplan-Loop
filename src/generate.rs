@@ -12,13 +12,25 @@ pub fn build_prompt(spec: &Spec, idea: &str, angle: &str) -> String {
     p.push_str("# Task\nWrite a draft business plan in Korean following the format below.\n\n");
     p.push_str(&format!("## Format: {}\n{}\n\n", spec.name, spec.context));
     if !angle.is_empty() {
-        p.push_str(&format!("## Differentiating angle for this draft\n{}\n\n", angle));
+        p.push_str(&format!(
+            "## Differentiating angle for this draft\n{}\n\n",
+            angle
+        ));
     }
     p.push_str(&format!("## Original idea material\n{}\n\n", idea));
-    p.push_str(&format!("## Sections to write\n{}\n\n", spec.sections_prompt()));
-    p.push_str(&format!("## Evaluation criteria (must keep in mind while writing)\n{}\n\n", spec.rubric_prompt()));
+    p.push_str(&format!(
+        "## Sections to write\n{}\n\n",
+        spec.sections_prompt()
+    ));
+    p.push_str(&format!(
+        "## Evaluation criteria (must keep in mind while writing)\n{}\n\n",
+        spec.rubric_prompt()
+    ));
     if spec.total_chars > 0 {
-        p.push_str(&format!("## Overall length\nApprox. {} characters including spaces\n\n", spec.total_chars));
+        p.push_str(&format!(
+            "## Overall length\nApprox. {} characters including spaces\n\n",
+            spec.total_chars
+        ));
     }
     p.push_str(
         "## Output rules\n\
@@ -43,12 +55,24 @@ pub fn build_revise_prompt(
     p.push_str(&format!("## Format: {}\n{}\n\n", spec.name, spec.context));
     p.push_str(&format!("## Original idea material\n{}\n\n", idea));
     p.push_str(&format!("## Current draft\n{}\n\n", prev_doc));
-    p.push_str(&format!("## Review feedback (must be incorporated)\n{}\n\n", feedback));
+    p.push_str(&format!(
+        "## Review feedback (must be incorporated)\n{}\n\n",
+        feedback
+    ));
     if !weak.is_empty() {
-        p.push_str(&format!("## Items with especially low scores\n{}\n\n", weak));
+        p.push_str(&format!(
+            "## Items with especially low scores\n{}\n\n",
+            weak
+        ));
     }
-    p.push_str(&format!("## Evaluation criteria\n{}\n\n", spec.rubric_prompt()));
-    p.push_str(&format!("## Section structure to preserve\n{}\n\n", spec.sections_prompt()));
+    p.push_str(&format!(
+        "## Evaluation criteria\n{}\n\n",
+        spec.rubric_prompt()
+    ));
+    p.push_str(&format!(
+        "## Section structure to preserve\n{}\n\n",
+        spec.sections_prompt()
+    ));
     p.push_str(
         "## Output rules\n\
          - Output the entire improved document in markdown. No change summary or meta-commentary.\n\

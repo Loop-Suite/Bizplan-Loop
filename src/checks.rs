@@ -57,28 +57,41 @@ pub fn metrics(doc: &str) -> Metrics {
     let mut i = 0usize;
     while i + 3 < bytes.len() {
         if (bytes[i] == '1' && bytes[i + 1] == '9' || bytes[i] == '2' && bytes[i + 1] == '0')
-            && bytes[i + 2].is_ascii_digit() && bytes[i + 3].is_ascii_digit() {
-                let prev_ok = i == 0 || !bytes[i - 1].is_ascii_digit();
-                let next_ok = i + 4 >= bytes.len() || !bytes[i + 4].is_ascii_digit();
-                if prev_ok && next_ok {
-                    years += 1;
-                    i += 4;
-                    continue;
-                }
+            && bytes[i + 2].is_ascii_digit()
+            && bytes[i + 3].is_ascii_digit()
+        {
+            let prev_ok = i == 0 || !bytes[i - 1].is_ascii_digit();
+            let next_ok = i + 4 >= bytes.len() || !bytes[i + 4].is_ascii_digit();
+            if prev_ok && next_ok {
+                years += 1;
+                i += 4;
+                continue;
             }
+        }
         i += 1;
     }
-    Metrics { chars: doc.chars().count(), tables, citations, years }
+    Metrics {
+        chars: doc.chars().count(),
+        tables,
+        citations,
+        years,
+    }
 }
 
 /// Titles of missing required sections.
 pub fn missing_sections(spec: &Spec, doc: &str) -> Vec<String> {
-    let heads: Vec<String> = split_sections(doc).into_iter().map(|(h, _)| norm(&h)).collect();
+    let heads: Vec<String> = split_sections(doc)
+        .into_iter()
+        .map(|(h, _)| norm(&h))
+        .collect();
     spec.sections
         .iter()
         .filter(|s| {
             let want = norm(&s.title);
-            s.required && !heads.iter().any(|h| h.contains(&want) || want.contains(h) && !h.is_empty())
+            s.required
+                && !heads
+                    .iter()
+                    .any(|h| h.contains(&want) || want.contains(h) && !h.is_empty())
         })
         .map(|s| s.title.clone())
         .collect()
@@ -142,7 +155,10 @@ pub fn format_issues(spec: &Spec, doc: &str) -> Vec<String> {
         ));
     }
     if spec.require_table && m.tables == 0 {
-        issues.push("No table present → present at least one of comparison/schedule/KPI as a table".to_string());
+        issues.push(
+            "No table present → present at least one of comparison/schedule/KPI as a table"
+                .to_string(),
+        );
     }
     issues
 }

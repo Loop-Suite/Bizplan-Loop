@@ -56,12 +56,7 @@ impl Llm {
         self.model.clone().unwrap_or_else(|| "default".to_string())
     }
 
-    fn call_once(
-        &self,
-        prompt: &str,
-        system: Option<&str>,
-        schema: Option<&str>,
-    ) -> Result<Reply> {
+    fn call_once(&self, prompt: &str, system: Option<&str>, schema: Option<&str>) -> Result<Reply> {
         let mut cmd = Command::new(&self.bin);
         cmd.arg("-p").arg("--output-format").arg("json");
         if !self.load_context {
@@ -81,26 +76,37 @@ impl Llm {
         if let Some(js) = schema {
             cmd.arg("--json-schema").arg(js);
         }
-        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
-        let mut child = cmd
-            .spawn()
-            .with_context(|| format!("Failed to run `{}` (check installation and PATH)", self.bin))?;
+        let mut child = cmd.spawn().with_context(|| {
+            format!("Failed to run `{}` (check installation and PATH)", self.bin)
+        })?;
 
         // Writing stdin and reading stdout/stderr must happen concurrently to avoid deadlock from pipe buffer saturation.
-        let mut sin = child.stdin.take().ok_or_else(|| anyhow!("Failed to open stdin"))?;
+        let mut sin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("Failed to open stdin"))?;
         let payload = prompt.to_string();
         let t_in = std::thread::spawn(move || {
             let _ = sin.write_all(payload.as_bytes());
             // drop(sin) → EOF
         });
-        let mut sout = child.stdout.take().ok_or_else(|| anyhow!("Failed to open stdout"))?;
+        let mut sout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("Failed to open stdout"))?;
         let t_out = std::thread::spawn(move || {
             let mut s = String::new();
             let _ = sout.read_to_string(&mut s);
             s
         });
-        let mut serr = child.stderr.take().ok_or_else(|| anyhow!("Failed to open stderr"))?;
+        let mut serr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow!("Failed to open stderr"))?;
         let t_err = std::thread::spawn(move || {
             let mut s = String::new();
             let _ = serr.read_to_string(&mut s);
@@ -115,7 +121,10 @@ impl Llm {
                     if started.elapsed() > self.timeout {
                         let _ = child.kill();
                         let _ = child.wait();
-                        return Err(anyhow!("Timeout exceeded {} seconds", self.timeout.as_secs()));
+                        return Err(anyhow!(
+                            "Timeout exceeded {} seconds",
+                            self.timeout.as_secs()
+                        ));
                     }
                     std::thread::sleep(Duration::from_millis(150));
                 }
@@ -133,8 +142,12 @@ impl Llm {
             ));
         }
 
-        let v: serde_json::Value = serde_json::from_str(stdout.trim())
-            .with_context(|| format!("Failed to parse claude JSON output: {}", truncate(&stdout, 300)))?;
+        let v: serde_json::Value = serde_json::from_str(stdout.trim()).with_context(|| {
+            format!(
+                "Failed to parse claude JSON output: {}",
+                truncate(&stdout, 300)
+            )
+        })?;
         if v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false) {
             return Err(anyhow!(
                 "claude error response (subtype={}): {}",
@@ -142,7 +155,10 @@ impl Llm {
                 truncate(v.get("result").and_then(|r| r.as_str()).unwrap_or(""), 300)
             ));
         }
-        let cost = v.get("total_cost_usd").and_then(|c| c.as_f64()).unwrap_or(0.0);
+        let cost = v
+            .get("total_cost_usd")
+            .and_then(|c| c.as_f64())
+            .unwrap_or(0.0);
         if cost > 0.0 {
             COST_MICROS.fetch_add((cost * 1_000_000.0) as u64, Ordering::Relaxed);
         }

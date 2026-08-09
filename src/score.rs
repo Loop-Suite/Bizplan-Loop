@@ -180,10 +180,7 @@ pub fn score_doc(
             .collect();
         let lo = vals.iter().cloned().fold(f64::INFINITY, f64::min);
         let hi = vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        spread.insert(
-            c.id.clone(),
-            if vals.is_empty() { 0.0 } else { hi - lo },
-        );
+        spread.insert(c.id.clone(), if vals.is_empty() { 0.0 } else { hi - lo });
         per_criterion.insert(c.id.clone(), trimmed_mean(&vals));
         raw.insert(c.id.clone(), vals);
     }

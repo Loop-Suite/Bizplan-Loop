@@ -1,0 +1,5 @@
+target/
+runs/
+.env
+.env.*
+.DS_Store

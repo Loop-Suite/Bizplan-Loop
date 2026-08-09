@@ -1,0 +1,46 @@
+name = "XX Support Program Business Plan (example spec)"
+context = """
+Fill in the hosting/judging context here. It's inserted directly into
+the prompt, so it's best to carry over the announcement's wording as closely as possible.
+"""
+scoring_source = "Copy the scoring rationale directly from the announcement text. If weights aren't disclosed, note 'undisclosed → even weighting'."
+total_chars = 4000
+min_citations = 2
+require_table = true
+
+angles = [
+  "Foreground the urgency and feasibility of solving the problem.",
+  "Foreground differentiation and creativity.",
+]
+
+[[sections]]
+id = "background"
+title = "1. Background"
+guide = "What to write, and on what grounds"
+chars = 800
+required = true
+
+[[sections]]
+id = "solution"
+title = "2. Proposed Approach"
+guide = "Problem → solution flow, implementation method"
+chars = 1500
+required = true
+
+[[criteria]]
+id = "feasibility"
+name = "Feasibility"
+weight = 40
+guide = "Is the scope of completed implementation, schedule, and risk response concrete?"
+
+[[criteria]]
+id = "creativity"
+name = "Creativity"
+weight = 30
+guide = "Is the differentiation from existing alternatives clear?"
+
+[[criteria]]
+id = "impact"
+name = "Impact"
+weight = 30
+guide = "Is the quantitative impact estimate well-grounded?"

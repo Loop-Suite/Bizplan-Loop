@@ -121,6 +121,11 @@ impl Llm {
                     if started.elapsed() > self.timeout {
                         let _ = child.kill();
                         let _ = child.wait();
+                        // Join the I/O threads before returning so they don't keep running
+                        // in the background after this call has already failed.
+                        let _ = t_in.join();
+                        let _ = t_out.join();
+                        let _ = t_err.join();
                         return Err(anyhow!(
                             "Timeout exceeded {} seconds",
                             self.timeout.as_secs()

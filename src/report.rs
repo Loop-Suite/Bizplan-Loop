@@ -82,8 +82,14 @@ fn details(rows: &[&Scored]) -> String {
             s.metrics.tables, s.metrics.citations, s.metrics.years, s.metrics.chars
         ));
         for c in &s.comments {
-            if !c.trim().is_empty() {
-                md.push_str(&format!("> {}\n\n", c));
+            let c = c.trim();
+            if !c.is_empty() {
+                // Judge comments are free text and occasionally contain embedded newlines;
+                // quote every line so the blockquote doesn't break out into a bare paragraph.
+                for line in c.lines() {
+                    md.push_str(&format!("> {}\n", line));
+                }
+                md.push('\n');
             }
         }
         if !s.format_issues.is_empty() {
@@ -99,7 +105,10 @@ fn details(rows: &[&Scored]) -> String {
             .iter()
             .filter(|i| !s.format_issues.contains(i))
         {
-            md.push_str(&format!("- {}\n", imp));
+            let imp = imp.trim();
+            if !imp.is_empty() {
+                md.push_str(&format!("- {}\n", imp.replace('\n', " ")));
+            }
         }
     }
     md

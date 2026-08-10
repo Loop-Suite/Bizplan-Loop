@@ -245,12 +245,20 @@ pub fn score_doc(
 pub fn feedback_text(s: &Scored) -> String {
     let mut out = String::from("[Revision instructions that must be incorporated]\n");
     for i in &s.improvements {
-        out.push_str(&format!("- {}\n", i));
+        let i = i.trim();
+        // Judge output is free text and occasionally contains embedded newlines; collapse
+        // them so one instruction can't masquerade as several unmarked lines in the prompt.
+        if !i.is_empty() {
+            out.push_str(&format!("- {}\n", i.replace('\n', " ")));
+        }
     }
     if !s.comments.is_empty() {
         out.push_str("\n[Overall Review Comments]\n");
         for c in &s.comments {
-            out.push_str(&format!("- {}\n", c));
+            let c = c.trim();
+            if !c.is_empty() {
+                out.push_str(&format!("- {}\n", c.replace('\n', " ")));
+            }
         }
     }
     out
@@ -356,5 +364,41 @@ JSON
             format!("{err:#}").contains("malformed"),
             "unexpected error: {err:#}"
         );
+    }
+
+    /// Observed against a real `claude -p --model haiku` judge call: the model returned a
+    /// `comment` value of "\nThis submission is not a business plan...\n" — free text with a
+    /// leading/trailing newline, which the JSON schema does not forbid. Before the fix, that
+    /// leading newline landed right after the "- " bullet marker, leaving the actual sentence
+    /// on its own unmarked line — indistinguishable in the prompt from a new, separate
+    /// instruction. Now it must be trimmed and any embedded newlines collapsed to spaces so
+    /// each bullet stays a single line.
+    #[test]
+    fn feedback_text_sanitizes_embedded_newlines_from_judge_output() {
+        let s = Scored {
+            label: "doc".into(),
+            total: 6.5,
+            per_criterion: BTreeMap::new(),
+            raw: BTreeMap::new(),
+            spread: BTreeMap::new(),
+            missing_sections: vec![],
+            format_issues: vec![],
+            metrics: crate::checks::Metrics::default(),
+            improvements: vec!["\nSubmit an actual business plan.\n".into()],
+            comments: vec!["\nThis submission is not a business plan.\n".into()],
+            rounds: 1,
+            models: vec!["haiku".into()],
+        };
+        let text = feedback_text(&s);
+        assert!(
+            text.contains("- Submit an actual business plan.\n"),
+            "improvement bullet not sanitized: {text:?}"
+        );
+        assert!(
+            text.contains("- This submission is not a business plan.\n"),
+            "comment bullet not sanitized: {text:?}"
+        );
+        // No bullet marker followed immediately by a newline (the pre-fix symptom).
+        assert!(!text.contains("- \n"), "found an empty bullet: {text:?}");
     }
 }

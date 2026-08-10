@@ -372,9 +372,9 @@ Global (apply to all subcommands):
 |---|---|---|
 | `--spec` | required | Path to `specs/*.toml` |
 | `--idea` | required | Path to the idea source file |
-| `-n`, `--count` | 3 | Number of drafts to generate |
+| `-n`, `--count` | 3 | Number of drafts to generate (max 20 — each is a paid LLM call) |
 | `--out` | `runs` | Output directory |
-| `--rounds` (alias `--judges`) | 2 | Scoring passes per document |
+| `--rounds` (alias `--judges`) | 2 | Scoring passes per document (max 10 — each round is a paid LLM call per document) |
 | `--concurrency` | 1 | Parallel generation/scoring |
 | `--no-score` | off | Generate only, skip scoring |
 
@@ -385,7 +385,7 @@ Global (apply to all subcommands):
 | `--spec` | required | Path to `specs/*.toml` |
 | `--input` | required | File, or directory of `*.md`/`*.txt` (skips `report.md`) |
 | `--out` | `runs` | Output directory |
-| `--rounds` (alias `--judges`) | 2 | Scoring passes per document |
+| `--rounds` (alias `--judges`) | 2 | Scoring passes per document (max 10 — each round is a paid LLM call per document) |
 | `--concurrency` | 1 | Parallel scoring |
 
 `loop`:
@@ -396,8 +396,8 @@ Global (apply to all subcommands):
 | `--idea` | required | Path to the idea source file |
 | `--out` | `runs` | Output directory |
 | `--target` | 85.0 | Early-stop score threshold |
-| `--max-iter` | 4 | Maximum iterations |
-| `--rounds` (alias `--judges`) | 2 | Scoring passes per iteration |
+| `--max-iter` | 4 | Maximum iterations (max 20 — each iteration is a paid LLM call) |
+| `--rounds` (alias `--judges`) | 2 | Scoring passes per iteration (max 10 — each round is a paid LLM call per document) |
 | `--min-delta` | 2.0 | Improvement below this counts toward stagnation |
 | `--patience` | 2 | Consecutive stagnant iterations before stopping |
 | `--angle` | spec's first angle | Framing angle for the initial draft |

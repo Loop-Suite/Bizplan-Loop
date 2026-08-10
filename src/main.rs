@@ -124,6 +124,50 @@ fn main() {
     }
 }
 
+/// Upper bound on `-n`/`--count` (`gen`) — each unit is a real (billed) generation LLM call.
+/// Without a cap, a typo (extra zero) turns one invocation into an unbounded number of paid API
+/// calls with no confirmation step. 20 is far beyond any real use case (the default is 3).
+const MAX_COUNT: usize = 20;
+
+/// Upper bound on `--rounds`/`--judges` (`gen`/`score`/`loop`) — each round is a real (billed)
+/// scoring LLM call per document. 10 is far beyond any real use case (the default is 2).
+const MAX_ROUNDS: usize = 10;
+
+/// Upper bound on `--max-iter` (`loop`) — each iteration re-generates and re-scores the draft
+/// with real (billed) LLM calls. 20 is far beyond any real use case (the default is 4, and the
+/// docs already note most of the literature's gains occur within the first 1-2 rounds).
+const MAX_ITER: usize = 20;
+
+/// Rejects unreasonably large `count`/`rounds`/`max_iter` values before any LLM call is made.
+/// These arguments directly multiply the number of real, billed `claude -p` invocations a single
+/// run makes; without an upper bound a typo'd or scripted value (e.g. `--rounds 200`) would run
+/// to completion with no confirmation step, potentially costing far more than intended.
+fn validate_call_bounds(
+    count: Option<usize>,
+    rounds: Option<usize>,
+    max_iter: Option<usize>,
+) -> Result<()> {
+    if let Some(c) = count {
+        anyhow::ensure!(
+            c <= MAX_COUNT,
+            "count (-n) too large ({c}, max {MAX_COUNT}) — would trigger an unbounded number of paid LLM calls"
+        );
+    }
+    if let Some(r) = rounds {
+        anyhow::ensure!(
+            r <= MAX_ROUNDS,
+            "rounds too large ({r}, max {MAX_ROUNDS}) — each round is a paid LLM call per document"
+        );
+    }
+    if let Some(m) = max_iter {
+        anyhow::ensure!(
+            m <= MAX_ITER,
+            "max_iter too large ({m}, max {MAX_ITER}) — each iteration is a paid LLM call"
+        );
+    }
+    Ok(())
+}
+
 fn build_llm(cli: &Cli, model: Option<String>) -> Llm {
     let mut l = Llm::new(cli.claude_bin.clone(), model);
     l.retries = cli.retries;
@@ -171,6 +215,7 @@ fn real_main() -> Result<()> {
             no_score,
         } => {
             anyhow::ensure!(*count > 0, "count (-n) must be at least 1 (got 0)");
+            validate_call_bounds(Some(*count), Some(*rounds), None)?;
             let sp = Spec::load(spec)?;
             let idea_text = read_text(idea)?;
             let out_dir = prepare_out(out)?;
@@ -220,6 +265,7 @@ fn real_main() -> Result<()> {
             rounds,
             concurrency,
         } => {
+            validate_call_bounds(None, Some(*rounds), None)?;
             let sp = Spec::load(spec)?;
             let out_dir = prepare_out(out)?;
             let files = collect_docs(input)?;
@@ -254,6 +300,7 @@ fn real_main() -> Result<()> {
             angle,
             gate_model,
         } => {
+            validate_call_bounds(None, Some(*rounds), Some(*max_iter))?;
             let sp = Spec::load(spec)?;
             let idea_text = read_text(idea)?;
             let out_dir = prepare_out(out)?;
@@ -544,5 +591,61 @@ mod tests {
         let docs = collect_docs(&dir).expect("reading an existing directory must not error");
         let _ = std::fs::remove_dir_all(&dir);
         assert!(docs.is_empty(), "expected no candidate docs, got: {docs:?}");
+    }
+
+    /// Regression: `--count`/`--rounds`/`--max-iter` used to parse as plain `usize` with no upper
+    /// bound, so `--rounds 200` would run to completion and fire 200 real (billed) LLM calls
+    /// before anyone noticed. Each must now be rejected at the boundary, before any LLM call.
+    #[test]
+    fn validate_call_bounds_rejects_count_over_the_cap() {
+        let err = validate_call_bounds(Some(MAX_COUNT + 1), None, None)
+            .expect_err("count over MAX_COUNT must be rejected");
+        assert!(
+            format!("{err:#}").contains("count"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn validate_call_bounds_accepts_count_at_the_cap() {
+        assert!(validate_call_bounds(Some(MAX_COUNT), None, None).is_ok());
+    }
+
+    #[test]
+    fn validate_call_bounds_rejects_rounds_over_the_cap() {
+        // The exact bug reported by the audit: `--rounds 200` must be rejected, not executed.
+        let err = validate_call_bounds(None, Some(200), None)
+            .expect_err("rounds over MAX_ROUNDS must be rejected");
+        assert!(
+            format!("{err:#}").contains("rounds"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn validate_call_bounds_accepts_rounds_at_the_cap() {
+        assert!(validate_call_bounds(None, Some(MAX_ROUNDS), None).is_ok());
+    }
+
+    #[test]
+    fn validate_call_bounds_rejects_max_iter_over_the_cap() {
+        let err = validate_call_bounds(None, None, Some(MAX_ITER + 1))
+            .expect_err("max_iter over MAX_ITER must be rejected");
+        assert!(
+            format!("{err:#}").contains("max_iter"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn validate_call_bounds_accepts_max_iter_at_the_cap() {
+        assert!(validate_call_bounds(None, None, Some(MAX_ITER)).is_ok());
+    }
+
+    /// `None` means "this subcommand doesn't have that argument" (e.g. `score` has no
+    /// `max_iter`) — it must never be treated as a violation.
+    #[test]
+    fn validate_call_bounds_ignores_absent_arguments() {
+        assert!(validate_call_bounds(None, None, None).is_ok());
     }
 }

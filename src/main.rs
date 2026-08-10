@@ -170,6 +170,7 @@ fn real_main() -> Result<()> {
             concurrency,
             no_score,
         } => {
+            anyhow::ensure!(*count > 0, "count (-n) must be at least 1 (got 0)");
             let sp = Spec::load(spec)?;
             let idea_text = read_text(idea)?;
             let out_dir = prepare_out(out)?;

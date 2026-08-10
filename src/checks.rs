@@ -20,13 +20,22 @@ fn norm(s: &str) -> String {
 }
 
 /// Split into (heading, body) pairs based on headings starting with `#`.
+/// Lines inside fenced code blocks (```` ``` ````) are never treated as headings,
+/// even if they start with `#` (e.g. Python/YAML comments).
 pub fn split_sections(doc: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     let mut cur_head = String::new();
     let mut cur_body = String::new();
+    let mut in_code_fence = false;
     for line in doc.lines() {
         let t = line.trim_start();
-        if t.starts_with('#') {
+        if t.starts_with("```") {
+            in_code_fence = !in_code_fence;
+            cur_body.push_str(line);
+            cur_body.push('\n');
+            continue;
+        }
+        if !in_code_fence && t.starts_with('#') {
             if !cur_head.is_empty() || !cur_body.trim().is_empty() {
                 out.push((cur_head.clone(), cur_body.clone()));
             }
@@ -161,4 +170,32 @@ pub fn format_issues(spec: &Spec, doc: &str) -> Vec<String> {
         );
     }
     issues
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_sections_ignores_hash_lines_inside_code_fences() {
+        let doc = "\
+# Overview
+This is the overview body.
+```python
+# not a heading, just a Python comment
+x = 1
+```
+Still part of the overview body after the fence.
+
+# Next Section
+Body of the next section.
+";
+        let secs = split_sections(doc);
+        assert_eq!(secs.len(), 2);
+        assert_eq!(secs[0].0, "Overview");
+        assert!(secs[0].1.contains("not a heading"));
+        assert!(secs[0].1.contains("Still part of the overview body"));
+        assert_eq!(secs[1].0, "Next Section");
+        assert!(secs[1].1.contains("Body of the next section"));
+    }
 }

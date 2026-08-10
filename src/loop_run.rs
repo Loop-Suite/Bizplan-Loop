@@ -86,7 +86,9 @@ pub fn run(
             stop_reason = format!("Reached target ({:.0} points)", cfg.target);
             break;
         }
-        if stall >= cfg.patience {
+        // Skip on the first iteration: there is no prior baseline to stall against yet,
+        // so it can never be a real stall (matters only for the edge case --patience 0).
+        if i > 0 && stall >= cfg.patience {
             stop_reason = format!(
                 "Improvement stalled ({} consecutive rounds under +{:.1} points)",
                 cfg.patience, cfg.min_delta

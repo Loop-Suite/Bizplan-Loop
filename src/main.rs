@@ -397,7 +397,23 @@ where
     (out, failed)
 }
 
+/// Generous upper bound on any single text input this tool reads (idea material for
+/// `gen`/`loop`, or a document passed to `score --input`). A real business-plan idea or
+/// draft is realistically at most a few hundred KB; this exists to fail fast with a clear,
+/// actionable error on an accidentally (or maliciously) huge/corrupted file, instead of
+/// buffering it all into memory and forwarding it whole into a paid LLM call.
+const MAX_INPUT_BYTES: u64 = 8 * 1024 * 1024; // 8 MiB
+
 fn read_text(p: &Path) -> Result<String> {
+    let meta =
+        std::fs::metadata(p).with_context(|| format!("Failed to read file: {}", p.display()))?;
+    anyhow::ensure!(
+        meta.len() <= MAX_INPUT_BYTES,
+        "File too large: {} ({} bytes, limit {} bytes) — check that the path is correct",
+        p.display(),
+        meta.len(),
+        MAX_INPUT_BYTES
+    );
     std::fs::read_to_string(p).with_context(|| format!("Failed to read file: {}", p.display()))
 }
 
@@ -424,4 +440,45 @@ fn collect_docs(input: &Path) -> Result<Vec<PathBuf>> {
         .collect();
     v.sort();
     Ok(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Nothing previously stopped a multi-GB idea/input file from being buffered fully into
+    /// memory and forwarded whole into a paid LLM call. `read_text` must now fail fast with a
+    /// clear, actionable error instead. `set_len` creates a sparse file so the test doesn't
+    /// actually allocate `MAX_INPUT_BYTES` of disk/memory.
+    #[test]
+    fn read_text_rejects_a_file_over_the_size_cap() {
+        let path = std::env::temp_dir().join(format!(
+            "bizplan_read_text_oversized_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        {
+            let f = std::fs::File::create(&path).unwrap();
+            f.set_len(MAX_INPUT_BYTES + 1).unwrap();
+        }
+        let err = read_text(&path).expect_err("a file over the size cap must be rejected");
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            format!("{err:#}").contains("too large"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn read_text_accepts_a_normal_sized_file() {
+        let path = std::env::temp_dir().join(format!(
+            "bizplan_read_text_normal_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::write(&path, "hello world").unwrap();
+        let text = read_text(&path).expect("a small file must be read normally");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(text, "hello world");
+    }
 }

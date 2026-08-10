@@ -22,15 +22,35 @@ fn norm(s: &str) -> String {
 /// Split into (heading, body) pairs based on headings starting with `#`.
 /// Lines inside fenced code blocks (```` ``` ````) are never treated as headings,
 /// even if they start with `#` (e.g. Python/YAML comments).
+///
+/// An unterminated fence (an odd number of ``` markers) is not allowed to swallow the
+/// rest of the document: the final, unmatched marker is treated as ordinary text instead
+/// of a fence toggle, so headings after it are still recognized.
 pub fn split_sections(doc: &str) -> Vec<(String, String)> {
+    let lines: Vec<&str> = doc.lines().collect();
+    let fence_line_idxs: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.trim_start().starts_with("```"))
+        .map(|(i, _)| i)
+        .collect();
+    let unmatched_fence = if fence_line_idxs.len() % 2 == 1 {
+        fence_line_idxs.last().copied()
+    } else {
+        None
+    };
+
     let mut out: Vec<(String, String)> = Vec::new();
     let mut cur_head = String::new();
     let mut cur_body = String::new();
     let mut in_code_fence = false;
-    for line in doc.lines() {
+    for (idx, line) in lines.iter().enumerate() {
+        let line = *line;
         let t = line.trim_start();
         if t.starts_with("```") {
-            in_code_fence = !in_code_fence;
+            if Some(idx) != unmatched_fence {
+                in_code_fence = !in_code_fence;
+            }
             cur_body.push_str(line);
             cur_body.push('\n');
             continue;
@@ -197,5 +217,26 @@ Body of the next section.
         assert!(secs[0].1.contains("Still part of the overview body"));
         assert_eq!(secs[1].0, "Next Section");
         assert!(secs[1].1.contains("Body of the next section"));
+    }
+
+    #[test]
+    fn split_sections_recovers_after_an_unterminated_code_fence() {
+        // The model forgot to close the fence in Section A. Without the fix, everything
+        // from that point to EOF (including the real "Section B" heading) gets swallowed
+        // into Section A's body, and Section B silently disappears from the parse.
+        let doc = "\
+# Section A
+Intro.
+```
+unterminated fence, never closed
+
+# Section B
+Body of B.
+";
+        let secs = split_sections(doc);
+        assert_eq!(secs.len(), 2);
+        assert_eq!(secs[0].0, "Section A");
+        assert_eq!(secs[1].0, "Section B");
+        assert!(secs[1].1.contains("Body of B"));
     }
 }

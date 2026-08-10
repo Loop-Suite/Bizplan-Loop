@@ -165,9 +165,29 @@ pub fn score_doc(
             .with_context(|| format!("Scoring failed ({label}, round {})", i + 1))?;
         let jr: JudgeResult = serde_json::from_value(v)
             .with_context(|| format!("Scoring result schema mismatch ({label})"))?;
+        // The JSON schema only bounds the *count* of criteria entries and constrains each
+        // entry's id to the known set — it does not require every id to appear exactly
+        // once. A judge reply that duplicates one id and omits another would otherwise
+        // silently score the omitted criterion from an empty sample (trimmed_mean(&[])
+        // == 0.0), tanking the weighted total with no visible error.
+        let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        let well_formed = jr.criteria.iter().all(|c| seen.insert(c.id.as_str()))
+            && spec.criteria.iter().all(|c| seen.contains(c.id.as_str()));
+        if !well_formed {
+            eprintln!(
+                "Warning: judge round {} ({label}, {}) returned malformed criteria ids (missing and/or duplicated) — round discarded",
+                i + 1,
+                llm.label()
+            );
+            continue;
+        }
         results.push(jr);
         models.push(llm.label());
     }
+    anyhow::ensure!(
+        !results.is_empty(),
+        "All {rounds} scoring round(s) for {label} returned malformed criteria ids"
+    );
 
     let mut per_criterion: BTreeMap<String, f64> = BTreeMap::new();
     let mut raw: BTreeMap<String, Vec<f64>> = BTreeMap::new();
@@ -216,7 +236,7 @@ pub fn score_doc(
         metrics: checks::metrics(doc),
         improvements,
         comments: results.iter().map(|r| r.comment.clone()).collect(),
-        rounds,
+        rounds: results.len(),
         models,
     })
 }
@@ -265,5 +285,76 @@ mod tests {
         assert_eq!(trimmed_mean(&[70.0, 72.0, 74.0, 100.0]), 73.0);
         assert_eq!(trimmed_mean(&[80.0]), 80.0);
         assert!((trimmed_mean(&[70.0, 80.0]) - 75.0).abs() < 1e-9);
+    }
+
+    /// Simulates a judge that duplicates one criterion id and omits another. The JSON
+    /// schema only constrains item *count* and per-item id validity, not that every
+    /// declared criterion id appears exactly once, so a judge can pass schema validation
+    /// while still doing this. Before the fix, this silently scored the omitted criterion
+    /// as 0.0 (from an empty sample) and folded that straight into the weighted total with
+    /// no warning. Now the malformed round is discarded, and score_doc errors out if that
+    /// leaves zero usable rounds rather than returning a silently corrupted score.
+    #[cfg(unix)]
+    #[test]
+    fn score_doc_rejects_a_judge_reply_with_duplicated_or_missing_criterion_ids() {
+        use crate::spec::{Criterion, Section};
+        use std::os::unix::fs::PermissionsExt;
+
+        let script_path = std::env::temp_dir().join(format!(
+            "bizplan_fake_claude_dup_{}_{:?}.sh",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let script = r#"#!/bin/sh
+cat > /dev/null
+cat << 'JSON'
+{"result":"ok","is_error":false,"total_cost_usd":0.0001,"structured_output":{"winning_conditions":["a","b","c"],"criteria":[{"id":"feasibility","evidence":"quote one quote one quote one quote one","why_not_higher":"x","score":80},{"id":"feasibility","evidence":"quote two quote two quote two quote two","why_not_higher":"y","score":90}],"improvements":["i1","i2","i3"],"comment":"c"}}
+JSON
+"#;
+        std::fs::write(&script_path, script).unwrap();
+        let mut perm = std::fs::metadata(&script_path).unwrap().permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&script_path, perm).unwrap();
+
+        let spec = Spec {
+            name: "probe".into(),
+            context: String::new(),
+            scoring_source: String::new(),
+            total_chars: 0,
+            min_citations: 0,
+            require_table: false,
+            angles: vec![],
+            bands: vec![],
+            sections: vec![Section {
+                id: "s".into(),
+                title: "S".into(),
+                guide: String::new(),
+                chars: 0,
+                required: false,
+            }],
+            criteria: vec![
+                Criterion {
+                    id: "feasibility".into(),
+                    name: "Feasibility".into(),
+                    weight: 1.0,
+                    guide: String::new(),
+                },
+                Criterion {
+                    id: "creativity".into(),
+                    name: "Creativity".into(),
+                    weight: 1.0,
+                    guide: String::new(),
+                },
+            ],
+        };
+        let judge = Llm::new(script_path.to_string_lossy().to_string(), None);
+        let result = score_doc(&[judge], &spec, "doc", "## S\nbody", 1);
+        let _ = std::fs::remove_file(&script_path);
+
+        let err = result.expect_err("a fully malformed judge reply must not yield a score");
+        assert!(
+            format!("{err:#}").contains("malformed"),
+            "unexpected error: {err:#}"
+        );
     }
 }

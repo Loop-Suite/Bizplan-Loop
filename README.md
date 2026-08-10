@@ -419,6 +419,23 @@ Global (apply to all subcommands):
 - None of this is an absolute grade — only a **relative** comparison within
   the same spec and the same judge model(s).
 
+## Real-world validation
+
+A real review-and-execution pass against this repo, not a synthetic benchmark: two rounds of
+static code review, followed by actually running the compiled `bizplan` binary against a live
+`claude -p --model haiku --judge-model haiku` judge. **10 issues found and fixed, total real
+cost ≈ $0.29** (four billed CLI invocations, no mocking).
+
+The most consequential finding: the judge's JSON schema never required every declared scoring
+criterion to appear in a reply, so a missing or duplicated criterion id silently scored as
+`0.0` instead of erroring — a bug that could quietly cost up to 40% of a document's total score
+with no warning ([#8](https://github.com/Loop-Suite/Bizplan-Loop/issues/8)). Also observed
+directly, not assumed: the `loop` self-improvement cycle actually working end-to-end against a
+live judge — a real run scored iteration 1 at 0.0 (rejected), fed that round's feedback into
+`revise()`, and iteration 2 scored 66.7.
+
+Full breakdown of every issue, phase, and cost: [`evals/README.md`](evals/README.md).
+
 ## Limitations / assumptions
 
 - LLM scores are not real judging scores — useful for relative comparison

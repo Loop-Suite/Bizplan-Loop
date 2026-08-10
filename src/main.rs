@@ -481,4 +481,68 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         assert_eq!(text, "hello world");
     }
+
+    #[test]
+    fn read_text_accepts_an_empty_file() {
+        let path = std::env::temp_dir().join(format!(
+            "bizplan_read_text_empty_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::write(&path, "").unwrap();
+        let text = read_text(&path).expect("an empty (0-byte) idea/input file must be accepted");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(text, "");
+    }
+
+    /// The size check is `<=`, not `<` — a file exactly at the cap must still be accepted,
+    /// only strictly-over must be rejected (already covered by
+    /// `read_text_rejects_a_file_over_the_size_cap`).
+    #[test]
+    fn read_text_accepts_a_file_exactly_at_the_size_cap() {
+        let path = std::env::temp_dir().join(format!(
+            "bizplan_read_text_at_cap_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        {
+            let f = std::fs::File::create(&path).unwrap();
+            f.set_len(MAX_INPUT_BYTES).unwrap();
+        }
+        let result = read_text(&path);
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            result.is_ok(),
+            "a file exactly at the size cap must be accepted, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn read_text_round_trips_multibyte_unicode_content() {
+        let path = std::env::temp_dir().join(format!(
+            "bizplan_read_text_unicode_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let content = "한글 아이디어 🚀 — café, naïve, 中文, עברית";
+        std::fs::write(&path, content).unwrap();
+        let text = read_text(&path).expect("unicode content must be read without error");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(text, content);
+    }
+
+    #[test]
+    fn collect_docs_returns_empty_for_a_directory_with_no_md_or_txt_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "bizplan_collect_docs_empty_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("notes.json"), "{}").unwrap();
+        std::fs::write(dir.join("report.md"), "# excluded").unwrap();
+        let docs = collect_docs(&dir).expect("reading an existing directory must not error");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(docs.is_empty(), "expected no candidate docs, got: {docs:?}");
+    }
 }

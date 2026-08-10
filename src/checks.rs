@@ -325,4 +325,61 @@ Body of B.
         assert_eq!(secs[1].0, "Section B");
         assert!(secs[1].1.contains("Body of B"));
     }
+
+    #[test]
+    fn empty_document_produces_zero_metrics_and_no_sections_without_panicking() {
+        let spec = spec_with_sections(&["Overview"]);
+        assert!(split_sections("").is_empty());
+        let m = metrics("");
+        assert_eq!((m.chars, m.tables, m.citations, m.years), (0, 0, 0, 0));
+        // An empty document is missing every required section — this must be reported
+        // cleanly, not panic on an out-of-bounds/empty-input edge case.
+        assert_eq!(missing_sections(&spec, ""), vec!["Overview".to_string()]);
+        assert!(!format_issues(&spec, "").is_empty());
+    }
+
+    #[test]
+    fn whitespace_only_document_is_treated_the_same_as_empty() {
+        let spec = spec_with_sections(&["Overview"]);
+        let doc = "   \n\t\n   \n";
+        assert!(split_sections(doc).is_empty());
+        assert_eq!(missing_sections(&spec, doc), vec!["Overview".to_string()]);
+    }
+
+    /// Multi-byte Unicode (emoji, combining diacritics, CJK, RTL script) must not panic the
+    /// char-boundary-sensitive code in `metrics` (the manual year-scan loop indexes into a
+    /// `Vec<char>`, not raw bytes, so this locks that in) or `split_sections`/`norm`.
+    #[test]
+    fn metrics_and_sections_handle_multibyte_unicode_without_panicking() {
+        let doc = "\
+# 개요 🚀\n\
+사업 계획 개요입니다. In 2024 we launched, and by 1999 the prior pilot had ended.\n\
+Combining mark test: e\u{0301}\u{0301}\u{0301} (e + combining acute x3).\n\
+RTL test: \u{0645}\u{0631}\u{062d}\u{0628}\u{0627} 2020년 기준.\n\
+Emoji cluster: 👨‍👩‍👧‍👦 family, 🇰🇷 flag.\n\
+| a | b |\n\
+|---|---|\n\
+| 1 | 2 |\n\
+「출처」 citation marker.\n";
+        let secs = split_sections(doc);
+        assert_eq!(secs.len(), 1);
+        assert_eq!(secs[0].0, "개요 🚀");
+        let m = metrics(doc);
+        assert_eq!(m.tables, 1);
+        assert_eq!(m.citations, 1);
+        // 2024, 1999, 2020 — three 4-digit year-shaped tokens.
+        assert_eq!(m.years, 3);
+        assert!(m.chars > 0);
+    }
+
+    /// A document containing a large run of multi-byte characters must not panic in the
+    /// year-scan loop's boundary arithmetic (`i + 3 < bytes.len()`, `i - 1`, `i + 4`), which
+    /// operates on a `Vec<char>` built from a huge/adversarial document.
+    #[test]
+    fn metrics_handles_a_document_that_is_almost_entirely_multibyte_characters() {
+        let doc = "🚀".repeat(5000) + "2023" + &"가".repeat(5000);
+        let m = metrics(&doc);
+        assert_eq!(m.years, 1);
+        assert_eq!(m.chars, 5000 + 4 + 5000);
+    }
 }

@@ -225,4 +225,52 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         assert_eq!(spec.criteria[0].weight, 1.5);
     }
+
+    #[test]
+    fn load_rejects_an_empty_file_with_a_clean_error_not_a_panic() {
+        let path = write_spec("");
+        let err = Spec::load(&path).expect_err("an empty spec file must not parse");
+        let _ = std::fs::remove_file(&path);
+        // `name` has no #[serde(default)], so TOML deserialization itself fails first.
+        assert!(!format!("{err:#}").is_empty());
+    }
+
+    /// Syntactically broken TOML (unterminated string, unbalanced table headers, garbage
+    /// bytes) must surface as a clean `Err` via the existing `with_context` wrapping, not a
+    /// panic, regardless of how mangled the input is.
+    #[test]
+    fn load_rejects_syntactically_invalid_toml_without_panicking() {
+        for bad in [
+            "name = \"unterminated",
+            "[[sections]\nid = \"s\"",
+            "= = = not toml at all = = =",
+            "\0\u{1}binary\u{2}garbage\0",
+        ] {
+            let path = write_spec(bad);
+            let err = Spec::load(&path);
+            let _ = std::fs::remove_file(&path);
+            assert!(err.is_err(), "expected an error for input: {bad:?}");
+        }
+    }
+
+    /// A weight given as the wrong TOML type (a string instead of a float) must fail
+    /// deserialization cleanly rather than silently coercing or panicking.
+    #[test]
+    fn load_rejects_a_weight_given_as_the_wrong_type() {
+        let path = write_spec(
+            r#"
+            name = "probe"
+            [[sections]]
+            id = "s"
+            title = "S"
+            [[criteria]]
+            id = "c1"
+            name = "C1"
+            weight = "high"
+            "#,
+        );
+        let err = Spec::load(&path);
+        let _ = std::fs::remove_file(&path);
+        assert!(err.is_err());
+    }
 }

@@ -350,4 +350,55 @@ JSON
             "expected the errored call's cost (0.0777 USD = 77700 micros) to be counted; before={before} after={after}"
         );
     }
+
+    #[test]
+    fn extract_json_errors_cleanly_on_empty_input() {
+        assert!(extract_json("").is_err());
+        assert!(extract_json("   \n\t  ").is_err());
+    }
+
+    /// A judge model that never manages to return anything JSON-shaped at all (not even
+    /// inside a code fence) — e.g. it just refuses in prose — must fail cleanly, not panic
+    /// and not silently succeed with garbage.
+    #[test]
+    fn extract_json_errors_cleanly_on_prose_with_no_json_anywhere() {
+        let prose = "I'm sorry, I can't evaluate this submission as it appears to be empty.";
+        assert!(extract_json(prose).is_err());
+    }
+
+    #[test]
+    fn extract_json_handles_malformed_json_inside_a_code_fence() {
+        // Valid fence markers, but the body inside is not valid JSON (trailing comma).
+        let raw = "```json\n{\"a\": 1,}\n```";
+        assert!(extract_json(raw).is_err());
+    }
+
+    #[test]
+    fn extract_json_recovers_a_valid_object_embedded_in_chatter() {
+        let raw = "Sure, here is the result:\n```json\n{\"a\": 1}\n```\nHope that helps!";
+        let v = extract_json(raw).unwrap();
+        assert_eq!(v["a"], 1);
+    }
+
+    /// `truncate` must cut on a `char` boundary, never in the middle of a multi-byte
+    /// character (which would either panic or produce invalid UTF-8 in a naive byte-slice
+    /// implementation).
+    #[test]
+    fn truncate_does_not_split_multibyte_characters() {
+        let s = "🚀".repeat(10) + "가나다라마" + &"🇰🇷".repeat(5);
+        for n in 0..20 {
+            let t = truncate(&s, n);
+            // Must be valid UTF-8 (guaranteed by the type) and never exceed n chars plus the
+            // possible trailing ellipsis marker.
+            assert!(t.chars().count() <= n + 1);
+        }
+        // A limit at or past the full length returns the string unchanged (no ellipsis).
+        assert_eq!(truncate(&s, s.chars().count()), s);
+    }
+
+    #[test]
+    fn truncate_handles_empty_string() {
+        assert_eq!(truncate("", 10), "");
+        assert_eq!(truncate("", 0), "");
+    }
 }

@@ -421,18 +421,28 @@ Global (apply to all subcommands):
 
 ## Real-world validation
 
-A real review-and-execution pass against this repo, not a synthetic benchmark: two rounds of
-static code review, followed by actually running the compiled `bizplan` binary against a live
-`claude -p --model haiku --judge-model haiku` judge. **10 issues found and fixed, total real
-cost ≈ $0.29** (four billed CLI invocations, no mocking).
+A real review-and-execution pass against this repo, not a synthetic benchmark: three rounds of
+static/adversarial code review, two separate rounds of actually running the compiled `bizplan`
+binary against a live `claude -p --model haiku --judge-model haiku` judge, and a versioning/
+release pass. **14 issues found and fixed, total real cost ≈ $0.70** (seven billed CLI
+invocations across both execution rounds, no mocking).
 
-The most consequential finding: the judge's JSON schema never required every declared scoring
-criterion to appear in a reply, so a missing or duplicated criterion id silently scored as
-`0.0` instead of erroring — a bug that could quietly cost up to 40% of a document's total score
-with no warning ([#8](https://github.com/Loop-Suite/Bizplan-Loop/issues/8)). Also observed
-directly, not assumed: the `loop` self-improvement cycle actually working end-to-end against a
-live judge — a real run scored iteration 1 at 0.0 (rejected), fed that round's feedback into
-`revise()`, and iteration 2 scored 66.7.
+The most consequential findings: (1) the judge's JSON schema never required every declared
+scoring criterion to appear in a reply, so a missing or duplicated criterion id silently scored
+as `0.0` instead of erroring — up to 40% of a document's total score with no warning
+([#8](https://github.com/Loop-Suite/Bizplan-Loop/issues/8)); and (2) a real, traceable
+prompt-injection chain — `idea.md` → generated draft → the judge's unescaped `<document>...
+</document>` interpolation — that let a crafted idea file break out of the tag and append
+fabricated scoring instructions to the judge, fixed with a tag-neutralizing `wrap_untrusted`
+helper and explicit "untrusted data, not instructions" framing in both system prompts
+([#17](https://github.com/Loop-Suite/Bizplan-Loop/issues/17)). Also observed directly, not
+assumed: the `loop` self-improvement cycle working end-to-end against a live judge (iteration 1
+scored 0.0, rejected; iteration 2 scored 66.7 after feedback), and the length-inflation canary
+firing for real on a later run (+359% length for +2.3 points, flagged as verbosity-gaming, not
+a bug).
+
+First tagged release: [`v0.1.0`](https://github.com/Loop-Suite/Bizplan-Loop/releases/tag/v0.1.0),
+with a [`CHANGELOG.md`](CHANGELOG.md).
 
 Full breakdown of every issue, phase, and cost: [`evals/README.md`](evals/README.md).
 

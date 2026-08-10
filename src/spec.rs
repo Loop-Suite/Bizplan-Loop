@@ -73,9 +73,16 @@ impl Spec {
             .with_context(|| format!("Failed to parse spec TOML: {}", path.display()))?;
         anyhow::ensure!(!spec.sections.is_empty(), "sections is empty");
         anyhow::ensure!(!spec.criteria.is_empty(), "criteria is empty");
+        // `> 0.0` alone lets `weight = inf` through (TOML supports inf/-inf/nan float
+        // literals, and `f64::INFINITY > 0.0` is true). An infinite weight makes
+        // `weight_sum()` infinite, so every criterion's `weight / wsum` becomes `inf/inf`
+        // = NaN, silently turning every score computed against this spec into NaN instead
+        // of failing fast here with a clear error.
         anyhow::ensure!(
-            spec.criteria.iter().all(|c| c.weight > 0.0),
-            "all criteria weights must be greater than 0"
+            spec.criteria
+                .iter()
+                .all(|c| c.weight > 0.0 && c.weight.is_finite()),
+            "all criteria weights must be greater than 0 and finite"
         );
         let mut ids: Vec<&str> = spec.criteria.iter().map(|c| c.id.as_str()).collect();
         ids.sort_unstable();
@@ -132,5 +139,90 @@ impl Spec {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_spec(toml: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "bizplan_spec_test_{}_{:?}_{}.toml",
+            std::process::id(),
+            std::thread::current().id(),
+            toml.len(), // cheap uniqueness across the multiple specs a single test writes
+        ));
+        std::fs::write(&path, toml).unwrap();
+        path
+    }
+
+    /// TOML supports `inf`/`-inf`/`nan` float literals, and `f64::INFINITY > 0.0` is `true`,
+    /// so the old `c.weight > 0.0` check alone let `weight = inf` through. That silently
+    /// turns every score computed against this spec into NaN (inf / inf in the weighted-sum
+    /// division) instead of failing fast here with a clear error at load time.
+    #[test]
+    fn load_rejects_an_infinite_weight() {
+        let path = write_spec(
+            r#"
+            name = "probe"
+            [[sections]]
+            id = "s"
+            title = "S"
+            [[criteria]]
+            id = "c1"
+            name = "C1"
+            weight = inf
+            "#,
+        );
+        let err = Spec::load(&path).expect_err("an infinite weight must be rejected");
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            format!("{err:#}").contains("finite"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    /// A negative-infinite weight is already excluded by `> 0.0`, but confirm it stays
+    /// rejected (not, say, accidentally let through by only checking `is_finite()`).
+    #[test]
+    fn load_rejects_a_negative_infinite_weight() {
+        let path = write_spec(
+            r#"
+            name = "probe"
+            [[sections]]
+            id = "s"
+            title = "S"
+            [[criteria]]
+            id = "c1"
+            name = "C1"
+            weight = -inf
+            "#,
+        );
+        let err = Spec::load(&path).expect_err("a negative-infinite weight must be rejected");
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            format!("{err:#}").contains("greater than 0"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn load_accepts_a_normal_finite_weight() {
+        let path = write_spec(
+            r#"
+            name = "probe"
+            [[sections]]
+            id = "s"
+            title = "S"
+            [[criteria]]
+            id = "c1"
+            name = "C1"
+            weight = 1.5
+            "#,
+        );
+        let spec = Spec::load(&path).expect("a normal finite weight must be accepted");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(spec.criteria[0].weight, 1.5);
     }
 }

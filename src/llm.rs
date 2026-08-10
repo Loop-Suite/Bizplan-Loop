@@ -153,19 +153,23 @@ impl Llm {
                 truncate(&stdout, 300)
             )
         })?;
-        if v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false) {
-            return Err(anyhow!(
-                "claude error response (subtype={}): {}",
-                v.get("subtype").and_then(|s| s.as_str()).unwrap_or("?"),
-                truncate(v.get("result").and_then(|r| r.as_str()).unwrap_or(""), 300)
-            ));
-        }
+        // Tally cost before checking is_error: an error response (e.g. hitting
+        // --max-budget-usd mid-generation, or a moderation/API error after partial
+        // output) still carries a real total_cost_usd for tokens already billed, and
+        // it must not be dropped from the running total just because the call failed.
         let cost = v
             .get("total_cost_usd")
             .and_then(|c| c.as_f64())
             .unwrap_or(0.0);
         if cost > 0.0 {
             COST_MICROS.fetch_add((cost * 1_000_000.0) as u64, Ordering::Relaxed);
+        }
+        if v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false) {
+            return Err(anyhow!(
+                "claude error response (subtype={}): {}",
+                v.get("subtype").and_then(|s| s.as_str()).unwrap_or("?"),
+                truncate(v.get("result").and_then(|r| r.as_str()).unwrap_or(""), 300)
+            ));
         }
         let text = v
             .get("result")
@@ -256,5 +260,57 @@ pub fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         s.chars().take(n).collect::<String>() + "…"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An `is_error: true` response still carries a real `total_cost_usd` for tokens
+    /// already billed before the failure (confirmed against actual `claude -p` output:
+    /// an invalid --model returns `{"is_error":true,"total_cost_usd":0,...}` — the field
+    /// is present on error responses too). That cost must not be silently dropped from
+    /// the running total just because the call ultimately failed.
+    #[cfg(unix)]
+    #[test]
+    fn error_response_cost_is_still_counted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let script_path = std::env::temp_dir().join(format!(
+            "bizplan_fake_claude_err_cost_{}_{:?}.sh",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let script = r#"#!/bin/sh
+cat > /dev/null
+cat << 'JSON'
+{"result":"budget exceeded","is_error":true,"subtype":"error_max_budget","total_cost_usd":0.0777}
+JSON
+"#;
+        std::fs::write(&script_path, script).unwrap();
+        let mut perm = std::fs::metadata(&script_path).unwrap().permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&script_path, perm).unwrap();
+
+        let mut llm = Llm::new(script_path.to_string_lossy().to_string(), None);
+        llm.retries = 0; // single attempt, so the cost delta below is exact for this call
+        let before = COST_MICROS.load(Ordering::Relaxed);
+        let result = llm.text("prompt", None);
+        let after = COST_MICROS.load(Ordering::Relaxed);
+        let _ = std::fs::remove_file(&script_path);
+
+        assert!(
+            result.is_err(),
+            "an is_error response must still surface as Err"
+        );
+        // Use >= rather than ==: COST_MICROS is a process-wide static shared with every
+        // other test in this binary that makes an LLM call, and it only ever increases
+        // (fetch_add, never subtracted), so a concurrently-running test can only push
+        // `after` higher than expected, never lower.
+        assert!(
+            after >= before + 77_700,
+            "expected the errored call's cost (0.0777 USD = 77700 micros) to be counted; before={before} after={after}"
+        );
     }
 }

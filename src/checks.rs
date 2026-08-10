@@ -107,22 +107,60 @@ pub fn metrics(doc: &str) -> Metrics {
     }
 }
 
+/// For each document heading (already `norm`-alized), find the index of the declared
+/// section it best represents, if any.
+///
+/// A heading matches a section if either contains the other (whitespace-insensitive
+/// partial match, per the spec format). A heading can match at most one section — the
+/// one whose title is closest in length (an exact match wins outright) — so e.g. a
+/// heading "Team Timeline" cannot also satisfy an unrelated, shorter declared section
+/// like "Team", and the heading "Team" cannot get stolen by the longer "Team Timeline"
+/// section either. Without this, one doc heading could silently satisfy two different
+/// declared sections whenever one section's title happens to be a substring of another's.
+fn match_headings(heads: &[String], wants: &[String]) -> Vec<Option<usize>> {
+    heads
+        .iter()
+        .map(|h| {
+            if h.is_empty() {
+                return None;
+            }
+            let mut best: Option<(usize, usize)> = None; // (section index, length diff)
+            for (i, want) in wants.iter().enumerate() {
+                if want.is_empty() {
+                    continue;
+                }
+                if h.contains(want) || want.contains(h) {
+                    let diff = h.len().abs_diff(want.len());
+                    let better = match best {
+                        None => true,
+                        Some((_, best_diff)) => diff < best_diff,
+                    };
+                    if better {
+                        best = Some((i, diff));
+                    }
+                }
+            }
+            best.map(|(i, _)| i)
+        })
+        .collect()
+}
+
 /// Titles of missing required sections.
 pub fn missing_sections(spec: &Spec, doc: &str) -> Vec<String> {
     let heads: Vec<String> = split_sections(doc)
         .into_iter()
         .map(|(h, _)| norm(&h))
         .collect();
+    let wants: Vec<String> = spec.sections.iter().map(|s| norm(&s.title)).collect();
+    let mut present = vec![false; spec.sections.len()];
+    for m in match_headings(&heads, &wants).into_iter().flatten() {
+        present[m] = true;
+    }
     spec.sections
         .iter()
-        .filter(|s| {
-            let want = norm(&s.title);
-            s.required
-                && !heads
-                    .iter()
-                    .any(|h| h.contains(&want) || want.contains(h) && !h.is_empty())
-        })
-        .map(|s| s.title.clone())
+        .zip(present)
+        .filter(|(s, p)| s.required && !p)
+        .map(|(s, _)| s.title.clone())
         .collect()
 }
 
@@ -135,14 +173,17 @@ pub fn format_issues(spec: &Spec, doc: &str) -> Vec<String> {
     }
 
     let secs = split_sections(doc);
-    for s in &spec.sections {
+    let heads: Vec<String> = secs.iter().map(|(h, _)| norm(h)).collect();
+    let wants: Vec<String> = spec.sections.iter().map(|s| norm(&s.title)).collect();
+    let matches = match_headings(&heads, &wants);
+    for (i, s) in spec.sections.iter().enumerate() {
         if s.chars == 0 {
             continue;
         }
-        let want = norm(&s.title);
-        if let Some((_, body)) = secs
+        if let Some((_, body)) = matches
             .iter()
-            .find(|(h, _)| !h.is_empty() && (norm(h).contains(&want) || want.contains(&norm(h))))
+            .position(|m| *m == Some(i))
+            .map(|hi| &secs[hi])
         {
             let n = body.chars().count();
             let lo = (s.chars as f64 * 0.6) as usize;
@@ -195,6 +236,51 @@ pub fn format_issues(spec: &Spec, doc: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spec::{Criterion, Section, Spec};
+
+    fn spec_with_sections(titles: &[&str]) -> Spec {
+        Spec {
+            name: "probe".into(),
+            context: String::new(),
+            scoring_source: String::new(),
+            total_chars: 0,
+            min_citations: 0,
+            require_table: false,
+            angles: vec![],
+            bands: vec![],
+            sections: titles
+                .iter()
+                .enumerate()
+                .map(|(i, t)| Section {
+                    id: format!("s{i}"),
+                    title: t.to_string(),
+                    guide: String::new(),
+                    chars: 0,
+                    required: true,
+                })
+                .collect(),
+            criteria: vec![Criterion {
+                id: "c".into(),
+                name: "c".into(),
+                weight: 1.0,
+                guide: String::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn missing_sections_does_not_let_one_heading_satisfy_two_declared_sections() {
+        // "Team" is a substring of "Team Timeline". The document only has a "Team
+        // Timeline" heading — "Team" itself is genuinely absent and must be reported.
+        let spec = spec_with_sections(&["Team", "Team Timeline"]);
+        let doc = "## Team Timeline\nsome body\n";
+        let missing = missing_sections(&spec, doc);
+        assert_eq!(missing, vec!["Team".to_string()]);
+
+        // Once both headings are present, nothing should be reported missing.
+        let doc_both = "## Team\nintro\n## Team Timeline\nschedule\n";
+        assert!(missing_sections(&spec, doc_both).is_empty());
+    }
 
     #[test]
     fn split_sections_ignores_hash_lines_inside_code_fences() {
